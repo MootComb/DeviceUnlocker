@@ -1,0 +1,67 @@
+name: Build Release APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: wrapper
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.jks
+
+      - name: Create keystore.properties
+        run: |
+          cat > keystore.properties <<EOF
+          storeFile=release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Generate tag
+        id: version
+        run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          DATE=$(date +%Y%m%d)
+          TAG="build-${GITHUB_RUN_NUMBER}-${DATE}-${SHORT_SHA}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Tag: $TAG"
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: DeviceUnlocker ${{ steps.version.outputs.tag }}
+          body: |
+            Automated build from commit ${{ github.sha }}
+
+            Author: @${{ github.actor }}
+          files: build/outputs/apk/release/*.apk
+          generate_release_notes: true
